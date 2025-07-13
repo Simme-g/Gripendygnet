@@ -1,132 +1,111 @@
 
+const drivers = ["Johan", "Henrik", "Fredrik", "Benny", "Joacim"];
+const schedule = [];
 const startTime = new Date();
 startTime.setHours(10, 0, 0, 0);
 startTime.setDate(startTime.getDate() + 1);
 
-const drivers = ["Johan", "Henrik", "Fredrik", "Benny", "Joacim"];
-const schedule = [];
-const scheduleDiv = document.getElementById("schedule");
+function toSeconds(val) {
+    const parts = val.split(":");
+    return parts.length === 2 ? parseInt(parts[0]) * 60 + parseInt(parts[1]) : 0;
+}
 
 function formatTime(date) {
     return date.toTimeString().slice(0, 5);
 }
 
-function renderSchedule() {
-    scheduleDiv.innerHTML = "";
-    let time = new Date(startTime);
-    for (let i = 0; i < 24; i++) {
-        const driver = drivers[i % drivers.length];
-        const pass = {
-            driver,
-            start: new Date(time),
-            lap1: null,
-            lap2: null
-        };
-        schedule.push(pass);
-
-        const passDiv = document.createElement("div");
-        passDiv.className = "pass";
-        passDiv.innerHTML = `
-            <strong>${driver}</strong> – Start: ${formatTime(time)}<br>
-            Varv 1: <input type="number" id="lap1-${i}" placeholder="min"> min
-            <input type="number" id="sec1-${i}" placeholder="sek"> sek<br>
-            Varv 2: <input type="number" id="lap2-${i}" placeholder="min"> min
-            <input type="number" id="sec2-${i}" placeholder="sek"> sek<br>
-        `;
-        scheduleDiv.appendChild(passDiv);
-
-        time.setMinutes(time.getMinutes() + 60);
+function updateSchedule() {
+    let current = new Date(startTime);
+    for (let i = 0; i < schedule.length; i++) {
+        const lap1Input = document.getElementById(`lap1-${i}`);
+        const lap2Input = document.getElementById(`lap2-${i}`);
+        const lap1 = lap1Input.value;
+        const lap2 = lap2Input.value;
+        const totalSec = toSeconds(lap1) + toSeconds(lap2);
+        const duration = totalSec > 0 ? totalSec : 60 * 60;
+        schedule[i].lap1 = lap1;
+        schedule[i].lap2 = lap2;
+        schedule[i].start = new Date(current);
+        current = new Date(current.getTime() + duration * 1000);
     }
+    renderSchedule();
+    updateStats();
 }
 
-function calculateStats() {
-    const totals = {};
-    const bestLap = { time: Infinity, driver: "" };
-    drivers.forEach(d => totals[d] = { time: 0, count: 0 });
+function generateSchedule() {
+    for (let i = 0; i < 24; i++) {
+        schedule.push({
+            driver: drivers[i % drivers.length],
+            lap1: "",
+            lap2: "",
+            start: new Date()
+        });
+    }
+    updateSchedule();
+}
 
-    schedule.forEach((pass, i) => {
-        const m1 = parseInt(document.getElementById("lap1-" + i)?.value || 0);
-        const s1 = parseInt(document.getElementById("sec1-" + i)?.value || 0);
-        const m2 = parseInt(document.getElementById("lap2-" + i)?.value || 0);
-        const s2 = parseInt(document.getElementById("sec2-" + i)?.value || 0);
-        const lapTimes = [m1 * 60 + s1, m2 * 60 + s2];
+function renderSchedule() {
+    const tbody = document.getElementById("schedule-body");
+    tbody.innerHTML = "";
+    schedule.forEach((s, i) => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td>${s.driver}</td>
+            <td>${formatTime(s.start)}</td>
+            <td><input id="lap1-${i}" value="${s.lap1}" onchange="updateSchedule()" placeholder="mm:ss"></td>
+            <td><input id="lap2-${i}" value="${s.lap2}" onchange="updateSchedule()" placeholder="mm:ss"></td>
+        `;
+        tbody.appendChild(row);
+    });
+}
 
-        lapTimes.forEach(t => {
-            if (t > 0) {
-                totals[pass.driver].time += t;
-                totals[pass.driver].count++;
-                if (t < bestLap.time) {
-                    bestLap.time = t;
-                    bestLap.driver = pass.driver;
-                }
+function updateStats() {
+    const stats = {};
+    drivers.forEach(d => stats[d] = { total: 0, count: 0 });
+
+    schedule.forEach(s => {
+        [s.lap1, s.lap2].forEach(val => {
+            const sec = toSeconds(val);
+            if (sec > 0) {
+                stats[s.driver].total += sec;
+                stats[s.driver].count++;
             }
         });
     });
 
-    const labels = [];
-    const data = [];
-    drivers.forEach(d => {
-        labels.push(d);
-        const avg = totals[d].count ? (totals[d].time / totals[d].count) : 0;
-        data.push(avg);
+    const sorted = drivers.map(d => ({
+        driver: d,
+        avg: stats[d].count ? stats[d].total / stats[d].count : Infinity
+    })).sort((a, b) => a.avg - b.avg);
+
+    const leaderboard = document.getElementById("leaderboard");
+    leaderboard.innerHTML = "";
+    sorted.slice(0, 5).forEach((entry, i) => {
+        const li = document.createElement("li");
+        const emoji = ["🥇", "🥈", "🥉", "🏅", "🎖"][i] || "";
+        li.textContent = `${emoji} ${entry.driver} – ${entry.avg === Infinity ? "-" : entry.avg.toFixed(1)} sek`;
+        leaderboard.appendChild(li);
     });
 
-    drawChart(labels, data);
-    console.log("Snabbaste varv:", bestLap);
-}
-
-function drawChart(labels, data) {
-    const ctx = document.getElementById('chart').getContext('2d');
+    const ctx = document.getElementById("chart").getContext("2d");
     if (window.myChart) window.myChart.destroy();
     window.myChart = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels,
+            labels: drivers,
             datasets: [{
-                label: 'Snitttid (sekunder)',
-                data,
+                label: "Snitttid (sek)",
+                data: drivers.map(d => stats[d].count ? stats[d].total / stats[d].count : 0),
+                backgroundColor: "crimson"
             }]
         },
         options: {
-            responsive: true
+            responsive: true,
+            scales: {
+                y: { beginAtZero: true }
+            }
         }
     });
 }
 
-renderSchedule();
-setInterval(calculateStats, 5000);
-
-function updateLeaderboard() {
-    const leaderboard = document.getElementById("leaderboard");
-    const allLaps = [];
-
-    schedule.forEach((pass, i) => {
-        const m1 = parseInt(document.getElementById("lap1-" + i)?.value || 0);
-        const s1 = parseInt(document.getElementById("sec1-" + i)?.value || 0);
-        const m2 = parseInt(document.getElementById("lap2-" + i)?.value || 0);
-        const s2 = parseInt(document.getElementById("sec2-" + i)?.value || 0);
-        const lapTimes = [
-            { driver: pass.driver, time: m1 * 60 + s1 },
-            { driver: pass.driver, time: m2 * 60 + s2 }
-        ];
-
-        lapTimes.forEach(lap => {
-            if (lap.time > 0) {
-                allLaps.push(lap);
-            }
-        });
-    });
-
-    allLaps.sort((a, b) => a.time - b.time);
-    const topLaps = allLaps.slice(0, 5);
-    leaderboard.innerHTML = "";
-    topLaps.forEach((lap, index) => {
-        const li = document.createElement("li");
-        const minutes = Math.floor(lap.time / 60);
-        const seconds = lap.time % 60;
-        li.textContent = `${index + 1}. ${lap.driver} – ${minutes}m ${seconds}s`;
-        leaderboard.appendChild(li);
-    });
-}
-
-setInterval(updateLeaderboard, 5000);
+generateSchedule();
